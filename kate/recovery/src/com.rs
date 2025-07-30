@@ -217,10 +217,16 @@ pub fn reconstruct_extrinsics(
 #[cfg(feature = "std")]
 pub fn reconstruct_columns(
 	dimensions: matrix::Dimensions,
-	cells: &[data::SingleCell],
+	cells: &[data::Cell],
 ) -> Result<HashMap<u16, Vec<[u8; CHUNK_SIZE]>>, ReconstructionError> {
 	// Convert cells into DataCells
-	let data_cells: Vec<data::DataCell> = cells.iter().cloned().map(Into::into).collect();
+	let data_cells: Vec<data::DataCell> = cells
+		.iter()
+		.map(|cell| match cell {
+			data::Cell::SingleCell(sc) => data::DataCell::from(sc.clone()),
+			data::Cell::MultiProofCell(mc) => data::DataCell::from(mc.clone()),
+		})
+		.collect();
 
 	// Map cells by column
 	let columns = map_cells(dimensions, data_cells)?;
@@ -329,7 +335,7 @@ pub fn decode_app_extrinsics(
 			.filter(|cell| !cell.data.is_empty())
 		{
 			None => app_data.extend(vec![0; CHUNK_SIZE]),
-			Some(cell) => app_data.extend(cell.data),
+			Some(cell) => app_data.extend(cell.data.clone()),
 		}
 	}
 
@@ -897,19 +903,19 @@ mod tests {
 		let cells = vec![
 			DataCell {
 				position: Position { row: 0, col: 0 },
-				data: coded[0].to_bytes().unwrap(),
+				data: coded[0].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 4, col: 0 },
-				data: coded[4].to_bytes().unwrap(),
+				data: coded[4].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 6, col: 0 },
-				data: coded[6].to_bytes().unwrap(),
+				data: coded[6].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 2, col: 0 },
-				data: coded[2].to_bytes().unwrap(),
+				data: coded[2].to_bytes().unwrap().to_vec(),
 			},
 		];
 
@@ -935,19 +941,19 @@ mod tests {
 		let cells = vec![
 			DataCell {
 				position: Position { row: 0, col: 0 },
-				data: coded[0].to_bytes().unwrap(),
+				data: coded[0].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 0, col: 0 },
-				data: coded[0].to_bytes().unwrap(),
+				data: coded[0].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 6, col: 0 },
-				data: coded[6].to_bytes().unwrap(),
+				data: coded[6].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 2, col: 0 },
-				data: coded[2].to_bytes().unwrap(),
+				data: coded[2].to_bytes().unwrap().to_vec(),
 			},
 		];
 
@@ -968,15 +974,15 @@ mod tests {
 		let cells = vec![
 			DataCell {
 				position: Position { row: 4, col: 0 },
-				data: coded[4].to_bytes().unwrap(),
+				data: coded[4].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 6, col: 0 },
-				data: coded[6].to_bytes().unwrap(),
+				data: coded[6].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 2, col: 0 },
-				data: coded[2].to_bytes().unwrap(),
+				data: coded[2].to_bytes().unwrap().to_vec(),
 			},
 		];
 
@@ -997,19 +1003,19 @@ mod tests {
 		let cells = vec![
 			DataCell {
 				position: Position { row: 0, col: 0 },
-				data: coded[0].to_bytes().unwrap(),
+				data: coded[0].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 5, col: 0 },
-				data: coded[4].to_bytes().unwrap(),
+				data: coded[4].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 6, col: 0 },
-				data: coded[6].to_bytes().unwrap(),
+				data: coded[6].to_bytes().unwrap().to_vec(),
 			},
 			DataCell {
 				position: Position { row: 2, col: 0 },
-				data: coded[2].to_bytes().unwrap(),
+				data: coded[2].to_bytes().unwrap().to_vec(),
 			},
 		];
 
