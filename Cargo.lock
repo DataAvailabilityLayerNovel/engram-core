@@ -2052,6 +2052,7 @@ dependencies = [
 name = "kate"
 version = "0.9.2"
 dependencies = [
+ "ark-ec",
  "avail-core",
  "criterion",
  "derive_more",

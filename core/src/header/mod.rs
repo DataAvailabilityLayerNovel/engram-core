@@ -441,6 +441,7 @@ mod tests {
 			extension::HeaderExtension::V3(ref mut ext) => {
 				ext.commitment.commitment = b"invalid commitment v3".to_vec();
 			},
+			extension::HeaderExtension::V4(_) => {},
 		};
 
 		(header, hash)
@@ -453,6 +454,7 @@ mod tests {
 			extension::HeaderExtension::V3(ref mut ext) => {
 				ext.commitment.data_root = H256::repeat_byte(2u8);
 			},
+			extension::HeaderExtension::V4(_) => {},
 		};
 
 		(header, hash)
@@ -465,6 +467,7 @@ mod tests {
 			extension::HeaderExtension::V3(ref mut ext) => {
 				ext.commitment.cols += 2;
 			},
+			extension::HeaderExtension::V4(_) => {},
 		};
 
 		(header, hash)
@@ -477,6 +480,7 @@ mod tests {
 			extension::HeaderExtension::V3(ref mut ext) => {
 				ext.commitment.rows += 2;
 			},
+			extension::HeaderExtension::V4(_) => {},
 		};
 
 		(header, hash)

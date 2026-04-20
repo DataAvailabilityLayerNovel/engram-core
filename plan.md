@@ -1,36 +1,51 @@
 ---
 name: CDA Architecture Upgrade Plan
-overview: Detailed implementation plan to upgrade the Avail repository to CDA (Coded Distributed Arrays) architecture with RLNC encoding, RDA networking topology, new node roles (Store Node, Fat Node), and segment multiproof verification -- organized across 5 phases (Phase 0-4) covering core library changes, development, unit testing, functional testing, and E2E testing.
+overview: Detailed implementation plan to upgrade the Avail repository to CDA (Coded Distributed Arrays) architecture with RLNC encoding, RDA networking topology, and segment multiproof verification. Covers 2 repos (avail: Validator/Full Node/Store Node; avail-light: Fat Node/Light Client) organized across 5 phases (Phase 0-4) covering core library changes, development, unit testing, functional testing, and E2E testing.
 todos:
+  - id: progress-init
+    content: "Tao progress.md o root, init cau truc theo dung format trong plan"
+    status: pending
   - id: phase-0-vendor
     content: "Phase 0.1: Fork avail-core, switch to path dependencies"
     status: pending
+  - id: phase-0-constants
+    content: "Phase 0.2a: Tao core/src/cda/constants.rs voi K_FACTOR=16, GRID 8x8 (extended 16x16), P2P 8x8"
+    status: pending
   - id: phase-0-types
-    content: "Phase 0.2-0.3: Define CDA types, HeaderExtension V4, KateCommitment v4"
+    content: "Phase 0.2b-0.3: Define CDA types, HeaderExtension V4, KateCommitment v4"
     status: pending
   - id: phase-0-kate
-    content: "Phase 0.4-0.5: Extend kate (full RS extension, column commitments, segment proof, RLNC) and kate-recovery"
+    content: "Phase 0.4-0.5: Extend kate (full RS extension, column commitments, segment proof, RLNC with fixed k=16) and kate-recovery"
     status: pending
   - id: phase-1-header
-    content: "Phase 1.1-1.3: build_extension_v3, Runtime APIs, DA Block Import update"
+    content: "Phase 1.1-1.3: build_extension_v3 (8x8->16x16, 16 column commitments), Runtime APIs, DA Block Import update"
     status: pending
   - id: phase-1-rpc
     content: "Phase 1.4: Kate RPC new endpoints (segment proof, column data)"
     status: pending
   - id: phase-1-cda-service
-    content: "Phase 1.5-1.6: CDA Service module (grid_position, subnet, store_node, fat_node, distribution, retrieval, sync) + node wiring"
+    content: "Phase 1.5-1.6 (avail): CDA Service module + P2P protocol registration + CLI flags (--store, --bootstrap, NO --fat) + service wiring per role -- Fat Node o avail-light"
+    status: pending
+  - id: phase-1-engram
+    content: "Phase 1.8: Engram standalone chain spec (7 validators, EGM, CDA+V4 from genesis, grid 8x8)"
     status: pending
   - id: phase-1-dactr
-    content: "Phase 1.7: da-control pallet CDA parameters"
+    content: "Phase 1.9: da-control pallet (CdaEnabled, HeaderVersion) + override BlockLength rows=8 cols=8"
+    status: pending
+  - id: phase-1-avail-light
+    content: "Phase 1.10 (avail-light fork): Fat Node implementation (cda module, fat_node.rs, re_coding, subnet, storage) + shared protocol in avail-core"
+    status: pending
+  - id: remaining-issues
+    content: "Xu ly I1-I12 (pallet-vector conflict, subnet protocols, storage, fork strategy, keys, bootnodes, telemetry, WASM size, seed, dual V3/V4, cache, benchmarks)"
     status: pending
   - id: phase-2-unit
-    content: "Phase 2: Unit tests for all new modules (avail-core, kate, node CDA)"
+    content: "Phase 2: Unit tests for all new modules (avail-core, kate with K_FACTOR=16, node CDA)"
     status: pending
   - id: phase-3-functional
-    content: "Phase 3: Functional tests (multi-node interactions, STORE/GET, RDA join, fallback)"
+    content: "Phase 3: Functional tests on Engram (multi-node, STORE/GET, RDA join, fallback)"
     status: pending
   - id: phase-4-e2e
-    content: "Phase 4: E2E tests (full lifecycle, backward compat, adversarial, benchmarks)"
+    content: "Phase 4: E2E tests on Engram (full lifecycle, adversarial, benchmarks, 5-7 validators + 8 Store [avail-node] + 16 Fat [avail-light] + 1+ Light Client)"
     status: pending
 isProject: false
 ---
@@ -58,8 +73,141 @@ isProject: false
 - KZG commitments **theo cot** tren ma tran mo rong, dua vao header extension
 - **Segment MultiProof**: Light Client chi can 1 phep Pairing cho toan bo segment
 - **RLNC encoding**: Store Node tao coded pieces + combined proof tu coding vector ngau nhien
-- **4 loai node moi**: Validator, Full Node (+ bootstrap), Store Node, Fat Node
+- **Node roles** (phan bo giua 2 repo):
+  - Trong repo `avail` (nay): Validator, Full Node (+ bootstrap), **Store Node**
+  - Trong repo `avail-light` (rieng): **Fat Node**, Light Client
 - **RDA**: PeerID -> grid position (deterministic hash), subnet Row/Column, bootstrap nodes
+
+### Phan chia trach nhiem giua 2 repositories
+
+| Repo | Role | Binary |
+|------|------|--------|
+| `avail` (nay) | Validator, Full Node, Bootstrap, Store Node | `avail-node` |
+| `avail-light` (fork rieng) | Fat Node, Light Client | `avail-light` |
+
+Ly do tach Fat Node sang `avail-light`:
+- Fat Node khong can chay full Substrate runtime -- chi can:
+  - Track block headers (da co trong avail-light)
+  - Lay column commitments tu header V4
+  - Verify RLNC pieces bang segment multiproof (Light Client da verify KZG)
+  - Luu tru RLNC pieces + serve on request
+- Tai nguyen nhe hon full node, phu hop hardware cua home users
+- Tan dung hien co cua avail-light: network layer, DAS sampling, header sync, config system
+
+---
+
+## Hang so ky thuat cho Engram (**FIXED** -- khong cau hinh runtime)
+
+| Hang so | Gia tri | Y nghia |
+|---------|---------|---------|
+| `K_FACTOR` | **16** | So pieces moi cell duoc chia theo chieu ngang (RLNC basis) |
+| `MATRIX_CHUNKS` | **16** | So chunks chia tu ma tran de gui toi Store Nodes (= 1 chunk per extended column) |
+| `GRID_ROWS_ORIGINAL` | **8** | So hang ma tran du lieu goc |
+| `GRID_COLS_ORIGINAL` | **8** | So cot ma tran du lieu goc |
+| `GRID_ROWS_EXTENDED` | **16** | Sau RS 2R mo rong |
+| `GRID_COLS_EXTENDED` | **16** | Sau RS 2C mo rong |
+| `P2P_ROWS` | **8** | So row subnets trong topology (mirror original grid) |
+| `P2P_COLS` | **8** | So column subnets trong topology (mirror original grid) |
+| Total cells (extended) | **256** | 16 × 16 |
+| Total pieces per block | **4096** | 16 × 16 × 16 |
+
+### Quan he giua P2P topology (8x8) va data grid extended (16x16)
+
+- Vi P2P chi co 8 column subnets nhung extended matrix co 16 cot:
+  - Extended column `c` (0..16) -> P2P subnet column `c / 2` (2 cot extended cung 1 subnet)
+- Tuong tu voi row: extended row `r` (0..16) -> P2P subnet row `r / 2`
+- Moi P2P cell `[r_sub, c_sub]` chiu trach nhiem cho **4 cells extended** (2x2 block)
+
+### Cac hang so dinh nghia o dau
+
+Tao file **`core/src/cda/constants.rs`** (trong avail-core fork):
+
+```rust
+pub const K_FACTOR: u16 = 16;
+pub const MATRIX_CHUNKS: u16 = 16;
+
+pub const GRID_ROWS_ORIGINAL: u16 = 8;
+pub const GRID_COLS_ORIGINAL: u16 = 8;
+pub const GRID_ROWS_EXTENDED: u16 = GRID_ROWS_ORIGINAL * 2;
+pub const GRID_COLS_EXTENDED: u16 = GRID_COLS_ORIGINAL * 2;
+
+pub const P2P_ROWS: u16 = 8;
+pub const P2P_COLS: u16 = 8;
+
+pub const fn p2p_row_from_extended(r: u16) -> u16 { r / 2 }
+pub const fn p2p_col_from_extended(c: u16) -> u16 { c / 2 }
+```
+
+### Tai sao fix cung cac gia tri nay?
+
+- Dam bao moi node trong mang tinh toan **cung grid dimensions**, khong can governance voting
+- Don gian hoa logic: khong can storage `KFactor`/`GridDimensions` trong pallet
+- SRS degree 1024 (couscous) du cho polynomial degree 256 (16×16) sau khi extended × 2 = 512 <= 1024 OK
+- Phu hop voi so validators 5-10 va so luong Store/Fat nodes thuc te (it nhat 64 nodes cho grid 8x8 populated)
+
+---
+
+## Progress Tracking -- File `progress.md`
+
+**Quy tac bat buoc**: Moi khi hoan thanh 1 feature/sub-task (tuong ung voi 1 muc trong todo list hoac 1 phan nho trong Detailed Tasks), phai ghi note vao file [progress.md](progress.md) o root repository.
+
+### Cau truc `progress.md`
+
+```markdown
+# CDA Implementation Progress
+
+## Phase 0: avail-core + kate extensions (shared)
+- [x] 0.1 Fork avail-core (date: 2026-04-20)
+- [x] 0.2 CDA types + protocol.rs defined (date: 2026-04-21)
+- [ ] 0.3 HeaderExtension V4 added
+- [ ] 0.4 kate crate extended (extend_full, column_commitments, segment_proof, rlnc)
+- [ ] 0.5 kate-recovery extended
+
+## Phase 1: Development (repo `avail`)
+- [ ] 1.1 build_extension_v3.rs created (V4 header builder)
+- [ ] 1.2 Runtime APIs updated
+- [ ] 1.3 DA Block Import V3+V4
+- [ ] 1.4 Kate RPC new endpoints
+- [ ] 1.5 node/src/cda module (no fat_node.rs)
+- [ ] 1.6 CLI flags + service wiring (--store, --bootstrap)
+- [ ] 1.7 Runtime transition strategy
+- [ ] 1.8 Engram chain spec
+- [ ] 1.9 da-control pallet updates
+
+## Phase 1.10: avail-light fork (repo `avail-light`)
+- [ ] 1.10.1 Fork avail-light, switch to avail-core path dependency
+- [ ] 1.10.2 AvailLightRole enum + CLI flag
+- [ ] 1.10.3 src/cda module (fat_node.rs, re_coding.rs, subnet.rs, storage.rs)
+- [ ] 1.10.4 Shared protocol.rs in avail-core
+- [ ] 1.10.5 Config YAML cho Fat Node
+- [ ] 1.10.6 HTTP API mo rong (GET /v1/cda/pieces/...)
+- [ ] 1.10.7 Light Client dung segment multiproof (1 Pairing)
+
+## Phase 2-4: Testing
+- [ ] 2.x Unit tests (both repos)
+- [ ] 3.x Functional tests (cross-binary)
+- [ ] 4.x E2E tests (engram network)
+
+## Notes & Decisions
+- 2026-04-20: Used `K_FACTOR = 16` as constant instead of runtime config
+- 2026-04-XX: Moved Fat Node to avail-light binary (cross-binary architecture)
+...
+
+## Blockers / Issues Found
+- [Date] [Short description]
+...
+
+## Cross-binary version compatibility log
+- avail-node vX.Y.Z <-> avail-light vA.B.C: [compatible | incompatible + reason]
+```
+
+### Quy tac cap nhat
+
+1. Khi bat dau 1 feature: them `- [ ] X.Y Description` vao section tuong ung
+2. Khi hoan thanh: doi `[ ]` thanh `[x]` va them `(date: YYYY-MM-DD)`
+3. Ghi lai cac **decision** quan trong (chon option A vs B, doi hang so, ...)
+4. Ghi lai **blockers** khi gap su co kho giai quyet
+5. **Chi dung 1 file duy nhat** -- khong tao nhieu file progress con
 
 ---
 
@@ -79,34 +227,35 @@ Xay dung nen tang kieu du lieu, trait, va primitive can thiet truoc khi bat ky m
 
 **0.2 Dinh nghia kieu du lieu CDA moi trong avail-core**
 
-Tao module moi `core/src/cda/mod.rs`:
+Tao module moi `core/src/cda/mod.rs` va `core/src/cda/constants.rs` (xem section "Hang so ky thuat cho Engram" o dau plan):
 
-- `CodingVector`: wrapper `Vec<Fr>` (k he so ngau nhien tu finite field)
-- `RLNCPiece`: struct { `coded_data: Vec<u8>`, `coding_vector: CodingVector` }
+- `CodingVector`: wrapper `[Fr; 16]` (16 he so co dinh tu finite field BLS12-381 Fr, vi K_FACTOR=16)
+- `RLNCPiece`: struct { `coded_data: Vec<u8>`, `coding_vector: CodingVector }` -- mat overhead 16×32 = 512 bytes per piece
 - `RLNCProof`: combined proof tu coding vector + base multiproofs (homomorphic)
 - `SegmentProof`: struct cho segment multiproof (single pairing verification)
-- `GridPosition`: struct { `row: u16`, `col: u16` } (vi tri tren grid cua node)
-- `SubnetId`: enum { `Row(u16)`, `Column(u16)` }
-- `NodeRole`: enum { `Validator`, `FullNode`, `StoreNode`, `FatNode` }
-- `PieceIndex`: index mot piece trong k pieces cua mot cell
+- `GridPosition`: struct { `row: u16` (0..8), `col: u16` (0..8) } -- toa do P2P subnet cua node
+- `SubnetId`: enum { `Row(u16)`, `Column(u16)` } (index 0..8)
+- `NodeRole`: enum { `Validator`, `FullNode`, `Bootstrap`, `StoreNode`, `FatNode` } -- `FatNode` duoc dung boi avail-light
+- `PieceIndex`: u16 (0..16)
+
+**Quan trong**: Cac kieu tren (dac biet `RLNCPiece`, `CodingVector`, `SegmentProof`, `GridPosition`, `SubnetId`, `NodeRole`) la **shared types** giua `avail` va `avail-light` qua crate `avail-core`. Day la ly do dat chung trong avail-core thay vi rieng trong tung repo.
 
 **0.3 Mo rong header extension (V4)**
 
 File: `core/src/header/extension/v4.rs` (moi), `core/src/header/extension/mod.rs`
 
 - Them variant `V4(v4::HeaderExtension)` vao enum `HeaderExtension`
-- V4 `HeaderExtension`:
+- V4 `HeaderExtension` (toi gian -- dung hang so thay vi field):
   - `app_lookup: DataLookup`
   - `commitment: kc::v4::KateCommitment` (moi)
-  - `grid_dims: GridDimensions` (original R x C)
-  - `extended_dims: GridDimensions` (2R x 2C)
-  - `k_factor: u16` (so pieces per cell)
+  - **KHONG** chua `grid_dims`, `extended_dims`, `k_factor` -- day la **hang so** trong `cda::constants`, moi node dung chung
 - V4 `KateCommitment`: file `core/src/kate_commitment.rs`
-  - `column_commitments: Vec<Vec<u8>>` (per-column KZG commitment tren ma tran 2Rx2C)
+  - `column_commitments: [Vec<u8>; 16]` (16 KZG commitments, mot cho moi extended column)
   - `data_root: H256`
-  - `rows: u16`, `cols: u16`
 
-**Backward compatibility**: Giu nguyen V3 variants, them V4; `HeaderVersion` enum them `V4 = 3`.
+**Header extension size V4**: 16 × 48 bytes (per commitment) + 32 bytes (data_root) + app_lookup ≈ **~800-1000 bytes**. Co chap nhan duoc.
+
+**Backward compatibility**: Giu nguyen V3 variants, them V4; `HeaderVersion` enum them `V4 = 3`. Engram genesis set `header_version = V4` tu block 1.
 
 **0.4 Mo rong kate crate**
 
@@ -232,44 +381,39 @@ File: [rpc/kate-rpc/src/lib.rs](rpc/kate-rpc/src/lib.rs)
   - `kate_queryColumnCommitments(at)` -> per-column commitments
 - Giu nguyen cac endpoints cu de backward compat
 
-**1.5 Tao module Node Roles & CDA Service** [Major new component]
+**1.5 Tao module Node Roles & CDA Service** [Major new component -- CHI trong repo `avail`]
 
-Tao thu muc `node/src/cda/` voi cac file:
+Tao thu muc `node/src/cda/` voi cac file (**KHONG** co `fat_node.rs` -- Fat Node o repo avail-light):
 
 - `node/src/cda/mod.rs` -- wiring va exports
-- `node/src/cda/config.rs` -- CDA-specific config (k_factor, grid params, node role)
+- `node/src/cda/config.rs` -- CDA-specific config (chi node role, sync timeout -- K_FACTOR va grid dims la hang so)
 - `node/src/cda/grid_position.rs` -- PeerID -> (row, col) deterministic mapping (hash function)
 - `node/src/cda/subnet.rs` -- Subnet Discovery Protocol
   - `SubnetManager`: quan ly membership cua Row Subnet va Column Subnet
   - Connect/disconnect peers khi join/leave
   - Bootstrap node logic: tham gia tat ca Row subnets
+  - Protocol phai **tuong thich** voi avail-light (cung protocol name, cung handshake) de Fat Node co the join subnet
 - `node/src/cda/store_node.rs` -- Store Node logic
   - Nhan raw data chunks tu Full Node
-  - RLNC encode: sinh coding vector per Fat Node, tinh coded piece + combined proof
-  - Gui goi tin (coding_vector, rlnc_piece, rlnc_proof) cho tung Fat Node trong column
+  - RLNC encode: sinh coding vector per Fat Node (dung PeerID cua avail-light Fat Node lam identifier), tinh coded piece + combined proof
+  - Gui goi tin (coding_vector, rlnc_piece, rlnc_proof) cho tung Fat Node (avail-light instance) trong column qua libp2p request-response
   - Tu luu 1 coded piece cho chinh minh
-- `node/src/cda/fat_node.rs` -- Fat Node logic
-  - Nhan RLNC pieces tu Store Node
-  - Verify qua Full Node (lay segment multiproof, check voi column commitment trong header)
-  - Luu coded pieces
-  - Tra lai coded pieces khi Store Node can reconstruct
-  - Re-coding: tao coded pieces moi tu coded pieces da luu (khong can decode)
 - `node/src/cda/full_node_service.rs` -- Full Node CDA extensions
   - Nhan block + expanded data tu validator
   - Chia data thanh chunks va phan phoi cho Store Nodes trong moi cell
-  - On-demand proof service: sinh multiproof khi co request
+  - On-demand proof service: sinh multiproof khi co request (tu avail-light Light Client hoac Fat Node)
   - Cache trung gian: polynomial, FFT, MSM results
   - Bootstrap node role: tham gia tat ca Row subnets
-  - Fallback path: khi cell khong co honest node, ket noi truc tiep toi Fat Nodes qua bootstrap
+  - Fallback path: khi cell khong co honest Store Node, ket noi truc tiep toi avail-light Fat Nodes qua bootstrap
 - `node/src/cda/data_distribution.rs` -- STORE mechanism
-  - Full Node -> Store Node: gui raw chunk + base proofs
-  - Store Node -> Fat Node: gui RLNC pieces
+  - Full Node -> Store Node: gui raw chunk + base proofs (cung repo)
+  - Store Node -> avail-light Fat Node: gui RLNC pieces (**cross-binary qua libp2p**)
   - Flow control va retry logic
 - `node/src/cda/data_retrieval.rs` -- GET mechanism
-  - Full Node request sampling -> Store Node thu thap tu Fat Nodes -> decode -> tra ve
+  - Full Node request sampling -> Store Node thu thap tu avail-light Fat Nodes -> decode -> tra ve
   - Fallback path khi cell khong co honest Store Node
-- `node/src/cda/sync.rs` -- State sync cho new nodes joining
-  - Dong bo du lieu lich su tu Column peers
+- `node/src/cda/sync.rs` -- State sync cho new Store Nodes joining
+  - Dong bo du lieu lich su tu Column peers (ca Store Nodes va Fat Nodes)
   - Timeout `delta_sync` (vd 15 phut)
 
 **1.6 Cap nhat Node Service Wiring va CLI Flags**
@@ -280,34 +424,23 @@ Hien tai da co san cac flags xac dinh role:
 - **Validator**: `--validator` (co san tu Substrate `sc_cli::RunCmd`, kiem tra qua `role.is_authority()` trong [node/src/service.rs](node/src/service.rs) dong 477). **Khong can sua.**
 - **Full Node**: Mac dinh khi khong truyen `--validator`. **Khong can sua.**
 
-Them cac flags **moi** cho CDA node roles:
+Them cac flags **moi** cho CDA node roles trong binary `avail-node` (**KHONG co `--fat`** vi Fat Node nam o binary `avail-light`):
 
 ```rust
 /// Run as a CDA Store Node.
 /// Store nodes receive raw data from Full Nodes, encode with RLNC,
-/// and distribute coded pieces to Fat Nodes in their custody column.
-/// Mutually exclusive with --fat and --validator.
-#[arg(long = "store", conflicts_with_all = &["fat", "validator"])]
+/// and distribute coded pieces to Fat Nodes (avail-light instances) in their custody column.
+/// Mutually exclusive with --validator.
+#[arg(long = "store", conflicts_with_all = &["validator"])]
 pub cda_store: bool,
-
-/// Run as a CDA Fat Node.
-/// Fat nodes store RLNC-coded chunks received from Store Nodes
-/// and serve them back on retrieval requests.
-/// Mutually exclusive with --store and --validator.
-#[arg(long = "fat", conflicts_with_all = &["store", "validator"])]
-pub cda_fat: bool,
 
 /// Enable this Full Node as a CDA bootstrap node.
 /// Bootstrap nodes participate in ALL row subnets and help new nodes
-/// discover peers. Only meaningful for Full Nodes (non-store, non-fat).
+/// (including avail-light Fat Nodes) discover peers.
+/// Only meaningful for Full Nodes (non-store).
 /// Validators act as bootstrap nodes automatically.
 #[arg(long = "bootstrap")]
 pub cda_bootstrap: bool,
-
-/// The k-factor for CDA cell splitting (number of pieces per cell).
-/// Default: 4. Applies to all CDA-aware node roles.
-#[arg(long = "k-factor", default_value_t = 4)]
-pub k_factor: u16,
 
 /// Sync timeout for new CDA nodes joining a column subnet (in seconds).
 /// Default: 900 (15 minutes).
@@ -315,24 +448,25 @@ pub k_factor: u16,
 pub cda_sync_timeout: u64,
 ```
 
-#### Bang tong hop flags theo role
+**Luu y**: Fat Node flag (`--fat`) va Light Client flag se nam trong `avail-light` binary, KHONG phai day.
+
+#### Bang tong hop flags theo role (binary `avail-node`)
 
 - `./avail-node --validator` -- Validator (+ tu dong bootstrap). Block production + KZG commitment.
 - `./avail-node` -- Full Node (default). Verify blocks + proof service + data distribution.
 - `./avail-node --bootstrap` -- Full Node + bootstrap. Tham gia tat ca Row subnets.
 - `./avail-node --store` -- Store Node. RLNC encode + distribute + decode on GET.
-- `./avail-node --fat` -- Fat Node. Luu RLNC pieces + cung cap khi duoc yeu cau.
+
+Fat Node va Light Client: xem section Phase 1.10 (avail-light).
 
 #### Conflicts & validation logic
 
 Trong [node/src/command.rs](node/src/command.rs), them validation:
-- `--store` va `--fat` mutually exclusive (clap `conflicts_with_all`)
 - `--store` va `--validator` mutually exclusive
-- `--fat` va `--validator` mutually exclusive
-- `--bootstrap` chi co y nghia khi KHONG co `--store` hoac `--fat` (warn neu ket hop, nhung khong error)
+- `--bootstrap` chi co y nghia khi KHONG co `--store` (warn neu ket hop, nhung khong error)
 - `--unsafe-da-sync` da co `conflicts_with_all = &["validator"]` -- giu nguyen, them `--store` vao conflict list vi Store Node can verify data
 
-#### CdaRole enum derivation
+#### CdaRole enum derivation (trong avail-node)
 
 Trong `node/src/cda/config.rs`, derive role tu CLI + Substrate role:
 
@@ -342,13 +476,12 @@ pub enum CdaRole {
     FullNode,     // default, no special flag
     Bootstrap,    // --bootstrap (Full Node + all row subnets)
     StoreNode,    // --store
-    FatNode,      // --fat
+    // FatNode: KHONG o day; nam o avail-light binary
 }
 
 impl CdaRole {
     pub fn from_cli(cli: &Cli, substrate_role: &sc_service::Role) -> Self {
         if cli.cda_store { return CdaRole::StoreNode; }
-        if cli.cda_fat { return CdaRole::FatNode; }
         if substrate_role.is_authority() { return CdaRole::Validator; }
         if cli.cda_bootstrap { return CdaRole::Bootstrap; }
         CdaRole::FullNode
@@ -370,7 +503,7 @@ match cda_role {
     CdaRole::FullNode | CdaRole::Bootstrap => {
         // Existing: GRANDPA voter, block import, Kate RPC
         // New: CDA data distribution worker (STORE mechanism)
-        // New: CDA proof service worker (on-demand multiproof)
+        // New: CDA proof service worker (on-demand multiproof for both Store Nodes and avail-light Fat Nodes)
         // New: subnet manager (row + column subnets)
         // If Bootstrap: join ALL row subnets
         // If FullNode: join assigned row + column subnets
@@ -379,34 +512,26 @@ match cda_role {
         // Existing: block import (but NO authoring, NO GRANDPA voting)
         // New: RLNC encoder worker
         // New: listen for chunks from Full Node
-        // New: distribute coded pieces to Fat Nodes
-        // New: GET responder (collect + decode + return)
+        // New: distribute coded pieces to avail-light Fat Nodes (cross-binary libp2p)
+        // New: GET responder (collect from Fat Nodes + decode + return)
         // New: subnet manager (assigned row + column subnets)
         // SKIP: Kate RPC proof endpoints (Store Node khong serve proofs)
     }
-    CdaRole::FatNode => {
-        // Existing: block import (header only, minimal state)
-        // New: listen for RLNC pieces from Store Nodes
-        // New: verify pieces via Full Node segment multiproof
-        // New: serve coded pieces on GET requests
-        // New: re-coding worker
-        // New: subnet manager (assigned column subnet only)
-        // SKIP: Kate RPC, GRANDPA voting, block authoring
-    }
+    // FatNode: implemented in avail-light binary, not here
 }
 ```
 
 #### Dam bao chain chay tron tru -- Graceful degradation
 
-- Neu `--store` hoac `--fat` duoc truyen nhung mang chua co CDA peers -> node van sync blocks binh thuong, chi log warning "No CDA peers found in subnet, waiting..."
-- Neu khong co flag CDA nao (`--store`, `--fat`) -> node chay nhu hien tai, KHONG khoi dong bat ky CDA worker nao. Dam bao 100% backward compat voi cach chay cu.
-- Feature gate: tat ca CDA workers wrap trong `if cda_enabled { ... }` check. `cda_enabled` = true khi bat ky CDA flag nao duoc truyen, HOAC khi runtime version >= V4.
-- Cac RPC endpoints moi (segment proof, column data) chi duoc register khi node la Full Node hoac Validator, khong register cho Store/Fat de tranh confusion.
+- Neu `--store` duoc truyen nhung mang chua co CDA peers (Fat Nodes, Full Nodes) -> node van sync blocks binh thuong, chi log warning "No CDA peers found in subnet, waiting..."
+- Neu khong co flag CDA nao (`--store`) -> node chay nhu hien tai, KHONG khoi dong bat ky CDA worker nao. Dam bao 100% backward compat voi cach chay cu.
+- Feature gate: tat ca CDA workers wrap trong `if cda_enabled { ... }` check. `cda_enabled` = true khi `--store` duoc truyen, HOAC khi runtime version >= V4.
+- Cac RPC endpoints moi (segment proof, column data) chi duoc register khi node la Full Node hoac Validator, khong register cho Store de tranh confusion.
 
 File: [node/src/rpc.rs](node/src/rpc.rs)
 
 - Compose CDA RPC namespace moi, conditional theo `CdaRole`
-- Store/Fat nodes: chi expose health/status RPC, khong expose kate proof RPC
+- Store node: chi expose health/status RPC, khong expose kate proof RPC
 
 #### Startup commands mau (Engram chain)
 
@@ -420,11 +545,11 @@ File: [node/src/rpc.rs](node/src/rpc.rs)
 # Full Node + Bootstrap (tham gia tat ca row subnets)
 ./avail-node --chain engram --bootstrap --enable-kate-rpc
 
-# Store Node
-./avail-node --chain engram --store --k-factor 4
+# Store Node (K_FACTOR=16 la hang so, khong can truyen)
+./avail-node --chain engram --store
 
-# Fat Node
-./avail-node --chain engram --fat
+# Fat Node (KHAC BINARY: avail-light)
+./avail-light --config engram-fat.yaml   # xem section 1.10
 
 # Dev mode voi CDA Store (de test local nhanh)
 ./avail-node --dev --store
@@ -432,13 +557,14 @@ File: [node/src/rpc.rs](node/src/rpc.rs)
 
 #### Tom tat tat ca CLI flags theo node role
 
-| Flag | Role | BABE/Author | GRANDPA Vote | Kate RPC | CDA Workers | Subnet |
-|------|------|-------------|--------------|----------|-------------|--------|
-| `--validator` | Validator | Co | Co | Tuy chon | Distribution | All Row (bootstrap) |
-| _(default)_ | Full Node | Khong | Co | Tuy chon | Distribution + Proof | Row + Column |
-| `--bootstrap` | Full Node + Bootstrap | Khong | Co | Nen bat | Distribution + Proof | All Row + Column |
-| `--store` | Store Node | Khong | Khong | Khong | RLNC Encode/Decode | Row + Column |
-| `--fat` | Fat Node | Khong | Khong | Khong | Storage + Serve | Column only |
+| Binary | Flag | Role | BABE/Author | GRANDPA Vote | Kate RPC | CDA Workers | Subnet |
+|--------|------|------|-------------|--------------|----------|-------------|--------|
+| `avail-node` | `--validator` | Validator | Co | Co | Tuy chon | Distribution | All Row (bootstrap) |
+| `avail-node` | _(default)_ | Full Node | Khong | Co | Tuy chon | Distribution + Proof | Row + Column |
+| `avail-node` | `--bootstrap` | Full Node + Bootstrap | Khong | Co | Nen bat | Distribution + Proof | All Row + Column |
+| `avail-node` | `--store` | Store Node | Khong | Khong | Khong | RLNC Encode/Decode | Row + Column |
+| `avail-light` | config `role: fat` | Fat Node | Khong | Khong | Khong | Storage + Serve | Column only |
+| `avail-light` | _(default)_ | Light Client | Khong | Khong | Khong | DAS sampling | N/A |
 
 **1.7 Dam bao chain chay tron tru -- Runtime Transition Strategy**
 
@@ -449,12 +575,12 @@ Khi chay tren chain rieng, can dam bao cac dieu kien sau:
 - `HeaderVersion` chuyen tu V3 -> V4 phai duoc control boi on-chain governance (hoac genesis config cho dev chain)
 - Truoc khi governance set V4, tat ca blocks van dung V3 -> khong break gi
 
-**b) Chain spec cho custom chain:**
+**b) Chain spec cho custom chain (ap dung cho upgrade chain da ton tai, KHONG phai Engram):**
 - Them CDA config vao genesis state trong chain spec ([node/src/chains/](node/src/chains/)):
-  - `k_factor: 4`
   - `header_version: "V3"` (ban dau, chuyen V4 sau khi mang on dinh)
   - `cda_enabled: false` (ban dau, bat sau)
-- Tao chain spec mau: `misc/genesis/cda-devnet.json`
+- **Engram dung `header_version=V4` + `cda_enabled=true` tu block 1** (khong can migration)
+- `K_FACTOR=16` va grid 8x8 la hang so compile-time, khong co trong genesis JSON
 
 **c) Migration path:**
 
@@ -465,7 +591,7 @@ Khi chay tren chain rieng, can dam bao cac dieu kien sau:
 
 *Truong hop upgrade chain da ton tai (vd: testnet cu):*
 1. Deploy binary moi voi `--chain your-chain` -- chay nhu cu vi `header_version` van la V3
-2. Start cac Store/Fat nodes voi `--store` / `--fat` -- chung sync blocks binh thuong, chua lam gi CDA
+2. Start cac Store nodes (`avail-node --store`) va Fat Nodes (`avail-light --config ... role: fat`) -- chung sync blocks binh thuong, chua lam gi CDA
 3. Governance call: set `header_version = V4`, `cda_enabled = true`
 4. Tu block tiep theo: Validators build V4 headers, Full Nodes phan phoi data, Store/Fat bat dau hoat dong
 5. Neu can rollback: governance set lai V3 -> chain tiep tuc voi V3 headers
@@ -552,9 +678,9 @@ Cac tham so can chinh trong `runtime_genesis_config` (file [node/src/chains/comm
 - **validatorCount**: 7 (hoac 5-10 tuy deployment)
 - **minimumValidatorCount**: 3 (dam bao >= 2/3 + 1 cho GRANDPA finality)
 - **minValidatorBond**: co the giam xuong cho testnet (hien tai 100_000 AVAIL = kha cao)
-- **blockLength**: giu nhu default hoac tang neu can throughput cao hon cho CDA
+- **blockLength**: ghi de de phu hop 8x8 grid -- `rows=8, cols=8, chunkSize=32` (thay vi default 256x256)
 - **vector pallet**: co the de cau hinh rong (khong bridge sang Ethereum) -- xem chi tiet ben duoi
-- **dataAvailability**: custom app_keys cho Engram
+- **dataAvailability**: custom app_keys cho Engram, `headerVersion=V4`, `cdaEnabled=true`
 
 #### 1.8.4 Xu ly vector pallet -- chain doc lap khong can Ethereum bridge
 
@@ -606,9 +732,10 @@ Cho mang 5-10 validators + CDA nodes:
 ./avail-node --chain engram --store \
   --bootnodes /ip4/<VAL1_IP>/tcp/30333/p2p/<VAL1_PEER_ID>
 
-# Fat Node
-./avail-node --chain engram --fat \
-  --bootnodes /ip4/<VAL1_IP>/tcp/30333/p2p/<VAL1_PEER_ID>
+# Fat Node (chay bang binary avail-light, khong phai avail-node)
+# Gia dinh da fork avail-light va build voi CDA support
+./avail-light --config /etc/engram/fat-node.yaml
+# fat-node.yaml co `role: fat` va bootstraps tro toi validator
 ```
 
 #### 1.8.7 CDA genesis parameters
@@ -618,11 +745,14 @@ Them vao genesis config cua Engram (trong `da-control` pallet hoac custom genesi
 ```json
 "dataAvailability": {
     "appKeys": [...],
-    "kFactor": 4,
     "cdaEnabled": true,
-    "headerVersion": "V4"
+    "headerVersion": "V4",
+    "gridRows": 8,
+    "gridCols": 8
 }
 ```
+
+**Luu y**: `kFactor=16` khong can nam trong genesis vi la **hang so compile-time** trong `avail-core/cda/constants.rs`. Tuong tu `gridRows`, `gridCols` co the de o genesis de sanity check, nhung gia tri thuc te duoc enforce boi constants.
 
 Dieu nay dam bao Engram chain khoi dong voi CDA tu block 1, khong can governance upgrade.
 
@@ -631,8 +761,8 @@ Dieu nay dam bao Engram chain khoi dong voi CDA tu block 1, khong can governance
 Tao `scripts/engram/` voi:
 - `generate_keys.sh` -- generate validator keys cho 5-10 validators
 - `generate_chainspec.sh` -- build va tao chain spec
-- `start_network.sh` -- khoi dong toan bo mang (validators + CDA nodes)
-- `docker-compose.yml` -- setup multi-node bang Docker
+- `start_network.sh` -- khoi dong toan bo mang: validators + full nodes + store nodes (tu avail-node) + fat nodes + light clients (tu avail-light)
+- `docker-compose.yml` -- setup multi-binary, multi-node bang Docker (images: `engram/avail-node:cda-v4` va `engram/avail-light:cda-v4`)
 
 ### Affected Files (Engram chain)
 
@@ -649,21 +779,171 @@ Tao `scripts/engram/` voi:
 
 File: [pallets/dactr/src/lib.rs](pallets/dactr/src/lib.rs)
 
-- Them storage items: `KFactor` (config), `GridDimensions` (extended), `CdaEnabled` (bool)
-- Them extrinsic/config cho CDA parameters (optional governance)
-- Genesis config: `k_factor`, `cda_enabled`, `header_version`
+- Them storage item: `CdaEnabled` (bool) va `HeaderVersion` (enum V3/V4)
+- **Khong** them storage cho `KFactor`, `GridRows`, `GridCols` -- cac gia tri nay la hang so compile-time trong `avail-core/cda/constants.rs`
+- Neu governance muon thay doi k_factor/grid size -> chi co the qua **runtime upgrade** (bump spec_version), khong phai qua extrinsic
+- Genesis config: `cda_enabled`, `header_version`
+- Override `BlockLengthColumns`/`BlockLengthRows` cho Engram (8 x 8) qua [pallets/system/src/limits.rs](pallets/system/src/limits.rs)
 
-### Affected Files
+---
 
+**1.10 Fork avail-light va implement Fat Node** (repo rieng)
+
+> **Repo rieng**: [github.com/availproject/avail-light](https://github.com/availproject/avail-light). Toan bo phan nay KHONG thuc hien trong repo `avail` nay -- can fork `avail-light` va lam song song.
+
+#### 1.10.1 Fork va setup avail-light
+
+- Fork `avail-light` sang `engram-project/avail-light` (hoac repo noi bo), branch `cda-v4`
+- Update `avail-light/Cargo.toml`:
+  - Chuyen dependency `avail-core` tu git tag sang path hoac git branch tro toi fork cua chung ta (cung avail-core fork cua Phase 0)
+  - Them `avail-kate-recovery` da extended o Phase 0.5
+- Dam bao avail-light dung cac type shared (`CodingVector`, `RLNCPiece`, `SegmentProof`, `GridPosition`, `SubnetId`, `NodeRole`) tu avail-core
+
+#### 1.10.2 Them CdaNodeRole vao avail-light config
+
+File (avail-light repo): `src/types.rs` / `src/config.rs`
+
+- Them enum `AvailLightRole`:
+  ```rust
+  pub enum AvailLightRole {
+      LightClient,  // default -- DAS sampling nhu hien tai
+      FatNode,      // luu RLNC pieces + serve
+  }
+  ```
+- Them config field `role: AvailLightRole` (mac dinh `LightClient`)
+- CLI flag moi: `--fat` hoac config YAML `role: fat`
+
+#### 1.10.3 Tao module `cda/` trong avail-light
+
+Tao thu muc (avail-light repo) `src/cda/`:
+
+- `src/cda/mod.rs` -- wiring
+- `src/cda/fat_node.rs` -- Fat Node main logic:
+  - Listen tren libp2p protocol `/engram/cda/piece/1` (cung protocol voi avail-node Store Node)
+  - Nhan RLNC pieces tu Store Nodes (avail-node `--store`)
+  - Verify piece qua Full Node: request segment multiproof qua `/engram/cda/segment-proof/1`, check voi `column_commitments` trong header V4 (avail-light da co header sync san)
+  - Store piece vao persistent DB (avail-light da co RocksDB wrapper)
+  - Serve pieces on request: khi Store Node or Light Client hoi retrieval -> tra ve (coding_vector, coded_data)
+- `src/cda/re_coding.rs` -- Re-coding worker:
+  - Tu coded pieces da luu, tao coded pieces **moi** (linear combination ngau nhien)
+  - Khong can decode ve original du lieu
+- `src/cda/subnet.rs` -- Fat Node chi tham gia **Column Subnet** (theo `p2p_col_from_extended(c)`), khong tham gia Row Subnet
+- `src/cda/storage.rs` -- schema storage pieces:
+  - Key: `(block_number, ext_row, ext_col, piece_index)`
+  - Value: `(coding_vector, coded_data)`
+  - Pruning: giu 10000 blocks gan nhat mac dinh (configurable)
+
+#### 1.10.4 Shared protocol definitions
+
+De tuong thich giua avail-node (Store/Full Node) va avail-light (Fat Node), protocol names va message format phai dong nhat. Dat o **avail-core** de ca 2 binary import:
+
+File (avail-core): `core/src/cda/protocol.rs` (moi)
+
+- Protocol names: `CDA_PIECE_PROTOCOL`, `CDA_SEGMENT_PROOF_PROTOCOL`, `CDA_SUBNET_GOSSIP_PROTOCOL` (version `/1`)
+- Message structs: `PieceRequest`, `PieceResponse`, `SegmentProofRequest`, `SegmentProofResponse`, `SubnetAnnounce`
+- SCALE/serde codec for on-wire format
+
+#### 1.10.5 Config file cho Fat Node (avail-light)
+
+File mau (`misc/configs/engram-fat.yaml`):
+
+```yaml
+role: fat
+
+# Chain connection
+http_server_host: "127.0.0.1"
+http_server_port: 7000
+full_node_ws: "ws://localhost:9944"  # avail-node RPC endpoint
+genesis_hash: "<engram-genesis-hash>"
+
+# P2P
+libp2p_port: 39001
+bootstraps:
+  - "/ip4/<VAL1_IP>/tcp/30333/p2p/<PEER_ID>"
+
+# CDA Fat Node specific
+cda:
+  column_subnet: auto           # tu dong tinh tu PeerID hash
+  storage_retention_blocks: 10000
+  max_storage_gb: 100
+  re_coding_enabled: true
+
+# Light Client base (tat khi role=fat)
+block_matrix_partition: null    # khong sampling khi la Fat Node
+confidence: 99.0
+```
+
+#### 1.10.6 Integration voi avail-light hien co
+
+Avail-light hien tai da co:
+- Header sync tu Full Node (qua RPC subscribe)
+- libp2p network layer
+- KZG commitment verification (kate-recovery)
+- DAS sampling logic
+
+Cong viec bo sung:
+- Them listener cho `/engram/cda/piece/1` protocol
+- Extend header verification: decode `HeaderExtension::V4` lay `column_commitments`
+- Disable DAS sampling khi `role == FatNode` (tiet kiem tai nguyen)
+- Expose HTTP API moi: `GET /v1/cda/pieces/{block}/{row}/{col}/{piece_index}` de serve pieces cho Light Clients khac
+
+#### 1.10.7 Light Client (mode default cua avail-light)
+
+Khi `role: LightClient` (default), Light Client duoc mo rong:
+- Doc `HeaderExtension::V4` va lay `column_commitments`
+- Request segment multiproof tu Full Node (avail-node) hoac Fat Node (avail-light `--fat`)
+- Verify bang **1 phep Pairing** (thay vi nhieu pairing nhu hien tai)
+- Fallback: neu Fat Nodes khong tra loi -> truy cap truc tiep Full Node
+
+### Affected Files (avail-light repo)
+
+- `Cargo.toml` -- update avail-core dependency
+- `src/types.rs` -- AvailLightRole enum
+- `src/config.rs` -- role field
+- `src/main.rs` -- branch theo role
+- `src/cda/mod.rs` -- **moi**
+- `src/cda/fat_node.rs` -- **moi**
+- `src/cda/re_coding.rs` -- **moi**
+- `src/cda/subnet.rs` -- **moi**
+- `src/cda/storage.rs` -- **moi**
+- `src/network/` -- them listener cho CDA protocols
+- `src/telemetry/` -- them metrics cho Fat Node
+
+### Affected Files (avail-core repo -- cross-binary shared)
+
+- `core/src/cda/protocol.rs` -- **moi** (protocol names + messages)
+
+### Validation (Phase 1.10)
+
+- `cargo build --release` tren avail-light fork thanh cong
+- `avail-light --config engram-fat.yaml` khoi dong, log "Fat Node mode, listening on column subnet X"
+- Fat Node nhan va verify duoc RLNC piece tu avail-node Store Node (kiem tra trong Phase 3)
+
+---
+
+### Affected Files (Phase 1 tong hop -- ca 2 repos)
+
+**Repo `avail` (nay):**
 
 | Area           | Files                                                                                                                                                                  |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | pallets/system | `native/build_extension_v3.rs` (moi), `native/mod.rs`, `native/hosted_header_builder.rs`                                                                               |
 | runtime        | `src/apis.rs`, `src/kate/native.rs`, `src/kate/mod.rs`, `src/lib.rs`                                                                                                   |
 | node           | `src/da_block_import.rs`, `src/service.rs`, `src/cli.rs`, `src/rpc.rs`, `src/lib.rs`                                                                                   |
-| node/cda (moi) | `mod.rs`, `config.rs`, `grid_position.rs`, `subnet.rs`, `store_node.rs`, `fat_node.rs`, `full_node_service.rs`, `data_distribution.rs`, `data_retrieval.rs`, `sync.rs` |
+| node/cda (moi) | `mod.rs`, `config.rs`, `grid_position.rs`, `subnet.rs`, `store_node.rs`, `full_node_service.rs`, `data_distribution.rs`, `data_retrieval.rs`, `sync.rs` (**KHONG co `fat_node.rs`** -- o avail-light) |
 | rpc            | `kate-rpc/src/lib.rs`                                                                                                                                                  |
 | pallets/dactr  | `src/lib.rs`                                                                                                                                                           |
+
+**Repo `avail-core` fork (shared):**
+
+| Area | Files |
+|------|-------|
+| core/src/cda | `mod.rs`, `constants.rs`, `protocol.rs` (shared voi avail-light), types (`CodingVector`, `RLNCPiece`, ...) |
+| core/src/header | `extension/v4.rs`, `extension/mod.rs` |
+| kate/src | `segment_proof.rs`, `rlnc.rs`, `gridgen/core.rs`, `com.rs` |
+| kate/recovery/src | verify segment + RLNC decode (shared voi avail-light) |
+
+**Repo `avail-light` fork (rieng):** Xem section 1.10.
 
 
 ### Dependencies
@@ -722,10 +1002,10 @@ Dam bao moi function/module moi hoat dong dung o cap do don vi, bao gom ca edge 
 
 **2.4 Unit tests cho kate RLNC**
 
-- `encode_rlnc`: voi k=4, verify coded piece kich thuoc 1/k
+- `encode_rlnc`: voi K_FACTOR=16, verify coded piece kich thuoc 1/16 cell
 - `decode_rlnc`: roundtrip encode -> decode = original
 - `combine_proofs_homomorphic`: combined proof verify thanh cong
-- Edge: k=1 (degenerate), coding vector co zero element, insufficient pieces for decode
+- Edge: coding vector co zero element, insufficient pieces for decode (< 16 pieces), rank deficiency cua 16x16 matrix
 
 **2.5 Unit tests cho node CDA modules**
 
@@ -781,11 +1061,14 @@ Verify interaction patterns giua Validator, Full Node, Store Node, va Fat Node t
 
 ### Detailed Tasks
 
-**3.1 Setup test harness multi-node**
+**3.1 Setup test harness multi-node (cross-binary)**
 
 - Mo rong [e2e/](e2e/) framework (hien tai co `Cargo.toml` rieng, `src/tests/`)
-- Tao test utilities de spawn nhieu node voi cac roles khac nhau
-- Chain spec cho test network voi CDA parameters (k_factor, grid dims)
+- Tao test utilities de spawn **ca 2 binary**:
+  - `avail-node` cho Validator, Full Node, Store Node
+  - `avail-light` cho Fat Node, Light Client (require avail-light fork da build san)
+- Chain spec cho test network tai su dung Engram (voi constants K_FACTOR=16, grid 8x8)
+- Workflow CI: checkout ca 2 repos (`avail` + `avail-light` fork) va build ca 2 binary truoc khi chay test
 
 **3.2 Test: Validator -> Full Node block propagation voi V4**
 
@@ -799,35 +1082,37 @@ Verify interaction patterns giua Validator, Full Node, Store Node, va Fat Node t
 - Gui chunks + base proofs cho Store Nodes trong moi cell
 - Verify Store Nodes nhan du data
 
-**3.4 Test: Store Node -> Fat Node RLNC distribution**
+**3.4 Test: Store Node (avail-node) -> Fat Node (avail-light) RLNC distribution**
 
-- Store Node encode RLNC voi random coding vectors
-- Gui coded pieces cho tung Fat Node
-- Fat Node verify qua Full Node (segment multiproof)
-- Fat Node luu coded pieces
+- Store Node (avail-node --store) encode RLNC voi random coding vectors
+- Gui coded pieces qua libp2p toi Fat Node (avail-light instance) trong cung column subnet
+- Fat Node verify qua Full Node (request segment multiproof, check voi header V4 column commitments)
+- Fat Node luu coded pieces vao RocksDB cua avail-light
 - Verify: moi Fat Node co coded piece khac nhau (different coding vector)
+- **Cross-binary check**: message format + protocol name match chinh xac
 
 **3.5 Test: GET mechanism -- sampling flow**
 
 - Full Node request sample tai vi tri [r,c]
-- Store Node thu thap coded pieces tu Fat Nodes
+- Store Node thu thap coded pieces tu cac Fat Nodes (avail-light) qua libp2p
 - Store Node decode RLNC -> tra ve original symbol
 - Full Node verify symbol voi commitment
 
 **3.6 Test: Fallback mechanism**
 
 - Tat Store Nodes tai cell [r,c]
-- Full Node kich hoat fallback: ket noi truc tiep toi Fat Nodes qua bootstrap
+- Full Node kich hoat fallback: ket noi truc tiep toi Fat Nodes (avail-light) qua bootstrap
 - Full Node tu thu thap RLNC pieces va decode
 - Verify: data van recovered thanh cong
 
-**3.7 Test: Node join (RDA)**
+**3.7 Test: Node join (RDA) -- ca 2 binary**
 
-- New node join network
-- Hash PeerID -> grid position
-- Gia nhap Row va Column subnets
+- New avail-node --store join network
+- New avail-light --fat join network
+- Hash PeerID -> grid position (cung logic o ca 2 binary)
+- Gia nhap Row va Column subnets (avail-node) hoac Column subnet only (avail-light fat)
 - Dong bo du lieu lich su tu Column peers
-- Verify: sau sync, node co the phuc vu GET requests
+- Verify: sau sync, ca 2 loai node co the phuc vu GET requests
 
 **3.8 Test: Bootstrap node functionality**
 
@@ -872,12 +1157,12 @@ Mo phong toan bo lifecycle tu luc du lieu duoc xuat ban den khi Light Client xac
 
 **4.1 Setup E2E test network**
 
-- 3+ Validators (BABE/GRANDPA)
-- 2+ Full Nodes (1 lam bootstrap)
-- 4+ Store Nodes (phan bo tren grid)
-- 8+ Fat Nodes (phan bo tren cac columns)
-- 1+ Light Client (simulated)
-- Chain spec `engram` voi CDA enabled tu genesis, k_factor=4, header_version=V4
+- 5-7 Validators (BABE/GRANDPA, binary `avail-node --validator`) -- phu hop genesis Engram
+- 2+ Full Nodes (1 lam bootstrap, binary `avail-node --bootstrap`)
+- **8+ Store Nodes** (binary `avail-node --store`, it nhat 1 cho moi column subnet, 8 column subnets)
+- **16+ Fat Nodes** (binary `avail-light` voi `role: fat`, it nhat 2 per column de co redundancy)
+- 1+ Light Client (binary `avail-light` default mode)
+- Chain spec `engram` voi CDA enabled tu genesis, K_FACTOR=16, GRID 8x8 (extended 16x16), header_version=V4
 
 **4.2 E2E Test: Complete data lifecycle**
 
@@ -980,22 +1265,53 @@ Step 8: Verify fallback
 
 ```mermaid
 graph TD
-    P0["Phase 0: avail-core + kate changes"] --> P1["Phase 1: Development"]
-    P1 --> P2["Phase 2: Unit Testing"]
-    P1 --> P3["Phase 3: Functional Testing"]
+    P0["Phase 0: avail-core + kate changes"] --> P1A["Phase 1 (avail): Validator/Full/Store"]
+    P0 --> P1B["Phase 1.10 (avail-light): Fat Node"]
+    P1A --> P2["Phase 2: Unit Testing"]
+    P1B --> P2
+    P1A --> P3["Phase 3: Functional Testing (cross-binary)"]
+    P1B --> P3
     P2 --> P3
     P3 --> P4["Phase 4: E2E Testing"]
-    
-    P0_1["0.2 CDA types"] --> P0_3["0.3 Header V4"]
+
+    P0_1["0.2 CDA types + protocol.rs"] --> P0_3["0.3 Header V4"]
     P0_1 --> P0_4["0.4 kate extension"]
     P0_4 --> P0_5["0.5 kate-recovery"]
-    P0_3 --> P1_1["1.1 build_extension_v3"]
-    P0_4 --> P1_1
-    P0_4 --> P1_2["1.2 Runtime APIs"]
-    P0_5 --> P1_4["1.4 Kate RPC"]
-    P0_1 --> P1_5["1.5 CDA Service"]
-    P1_1 --> P1_3["1.3 DA Block Import"]
-    P1_5 --> P1_6["1.6 Service Wiring"]
+    P0_1 -.shared.-> P1B
+    P0_5 -.shared.-> P1B
+```
+
+## Architecture Diagram -- 2 binaries + shared crates
+
+```mermaid
+graph LR
+    subgraph availCoreShared ["avail-core (shared crate, fork)"]
+        cdaConstants["cda/constants.rs<br/>K_FACTOR=16, Grid 8x8"]
+        cdaTypes["cda/types<br/>RLNCPiece, SegmentProof..."]
+        cdaProto["cda/protocol.rs<br/>libp2p messages"]
+        headerV4["HeaderExtension V4"]
+        kateExt["kate + kate-recovery"]
+    end
+
+    subgraph availRepo ["avail repo (binary: avail-node)"]
+        validator["Validator<br/>--validator"]
+        fullNode["Full Node<br/>(default)"]
+        bootstrap["Bootstrap<br/>--bootstrap"]
+        storeNode["Store Node<br/>--store"]
+    end
+
+    subgraph availLightRepo ["avail-light repo (binary: avail-light)"]
+        fatNode["Fat Node<br/>role: fat"]
+        lightClient["Light Client<br/>default"]
+    end
+
+    availCoreShared --> availRepo
+    availCoreShared --> availLightRepo
+
+    storeNode -->|libp2p CDA_PIECE_PROTOCOL| fatNode
+    fullNode -->|libp2p CDA_SEGMENT_PROOF_PROTOCOL| fatNode
+    fullNode -->|libp2p CDA_SEGMENT_PROOF_PROTOCOL| lightClient
+    fatNode -->|libp2p GET piece| storeNode
 ```
 
 
@@ -1005,9 +1321,125 @@ graph TD
 ## Assumptions
 
 - [Assumption] `avail-core` se duoc fork va develop locally (path dependency) thay vi upstream PR truoc -- can confirm voi team
-- [Assumption] SRS `couscous` (degree 1024) du cho grid dimensions moi voi 2Rx2C; neu khong, can upgrade SRS
-- [Assumption] `k_factor` (so pieces per cell) se la runtime config, mac dinh 4
+- [Assumption] SRS `couscous` (degree 1024) du cho grid 8x8 extended 16x16 (polynomial degree toi da = 16 × 16 = 256 << 1024, an toan)
+- **[Fixed] `K_FACTOR = 16`**: Hang so compile-time, khong phai runtime config
+- **[Fixed] Grid 8x8 original, 16x16 extended**: Hang so compile-time
+- **[Fixed] P2P topology 8x8**: Mirror original grid, 2 extended cols/rows per P2P subnet
 - [Assumption] Subnet discovery dung tren `sc-network` request-response protocol, khong can them network crate moi
 - [Assumption] Light Client khong nam trong repo nay; E2E test se mock/simulate Light Client behavior
 - [Assumption] RLNC finite field = BLS12-381 scalar field (Fr) -- cung field voi KZG
+
+---
+
+## Remaining Implementation Issues (Phase 5+ / Follow-ups)
+
+Danh sach van de can giai quyet trong/sau qua trinh trien khai. Ghi chu tuong ung trong `progress.md` khi xu ly.
+
+### I1. pallet-vector genesis conflict voi chain doc lap
+
+- **Van de**: `pallet-vector` yeu cau set cac constants Ethereum bridge trong genesis (`BROADCASTER`, `GENESIS_VALIDATOR_ROOT`, `STEP_VK`, `ROTATE_VK`). Khi Engram khong bridge, cac value nay la placeholder va **co the panic** trong `GenesisBuild` impl.
+- **Action**: Kiem tra [pallets/vector/src/lib.rs](pallets/vector/src/lib.rs) -- neu panic, dung Option B (disable pallet-vector qua feature flag `engram`). Them vao [runtime/Cargo.toml](runtime/Cargo.toml) feature `engram = []` va wrap pallet-vector trong `#[cfg(not(feature = "engram"))]`.
+- **Owner**: Phase 1.8
+
+### I2. Subnet network protocol registration
+
+- **Van de**: Plan chua dinh nghia cac libp2p protocol names cho CDA subnets.
+- **Action**: Dinh nghia trong `node/src/cda/subnet.rs`:
+  - `/<chain-id>/cda/subnet/row/1` -- gossip subnet row membership
+  - `/<chain-id>/cda/subnet/col/1` -- gossip subnet column membership
+  - `/<chain-id>/cda/piece/1` -- request-response de fetch RLNC piece
+  - `/<chain-id>/cda/segment-proof/1` -- request-response de fetch segment multiproof
+- Dang ky trong [node/src/service.rs](node/src/service.rs) qua `sc_network_config::NonDefaultSetConfig` va `RequestResponseConfig`.
+- **Owner**: Phase 1.5
+
+### I3. Storage persistence cho Store/Fat nodes (cross-binary)
+
+- **Van de**: RLNC pieces can persistent storage. Schema phai nhat quan giua 2 binary.
+- **Action**:
+  - avail-node Store Node: them auxiliary DB column trong Substrate RocksDB (`sc_client_db::columns::AUX`)
+  - avail-light Fat Node: dung RocksDB wrapper san co cua avail-light
+  - Schema nhat quan: Key `(block_number, ext_row, ext_col, piece_index)` -> Value `(coding_vector, coded_data)`
+  - Pruning: mac dinh giu 10000 blocks gan nhat (configurable qua `--cda-retention-blocks` o avail-node va `storage_retention_blocks` o avail-light config)
+- **Owner**: Phase 1.5 (store_node.rs trong avail), Phase 1.10 (fat_node.rs, storage.rs trong avail-light)
+
+### I4. Avail-core fork strategy
+
+- **Van de**: Path dependency local khong dong bo upstream.
+- **Action**: Tao fork chinh thuc `engram-project/avail-core` (hoac repo noi bo) voi branch `cda-v4`. Document trong `progress.md` cach rebase tu upstream tags khi co update.
+- **Owner**: Phase 0.1
+
+### I5. Key ceremony cho Engram validators
+
+- **Van de**: `AuthorityKeys::from_seed("Alice")` KHONG AN TOAN cho production.
+- **Action**: Tao `scripts/engram/generate_keys.sh`:
+  - Goi `avail-node key generate` x N (7 validators) de sinh Sr25519 + Ed25519 + session keys
+  - Luu keys an toan, chi export public keys vao chain spec
+  - Tao tai lieu `docs/engram-key-ceremony.md`
+- **Owner**: Phase 1.8
+
+### I6. Bootnodes bootstrap flow
+
+- **Van de**: `boot_nodes: vec![]` trong chain spec -> new nodes khong tim duoc peers.
+- **Action**:
+  - Sau khi build binary, chay validator 1 -> lay PeerID
+  - Populate `boot_nodes` trong chain spec JSON voi `/ip4/<VAL1_IP>/tcp/30333/p2p/<PEER_ID>`
+  - Chay `build-spec --raw` lan 2 de bake vao raw spec
+- **Owner**: Phase 1.8
+
+### I7. Telemetry endpoint
+
+- **Van de**: Chain spec Engram co the ke thua telemetry Avail khong phu hop.
+- **Action**: Tat telemetry (`with_telemetry_endpoints(Default::default())`) hoac dung endpoint rieng. Default: tat cho testnet.
+- **Owner**: Phase 1.8
+
+### I8. Runtime WASM size check
+
+- **Van de**: CDA code co the lam runtime vuot 5MB.
+- **Action**: Monitor `target/release/wbuild/da-runtime/da_runtime.compact.compressed.wasm` sau moi phase. Neu vuot:
+  - Chuyen logic nang (RLNC decode, segment verify) ra native thay vi runtime
+  - Chi giu verify-side minimal trong runtime
+- **Owner**: Continuous (kiem tra cuoi moi Phase 1.x)
+
+### I9. Seed determinism cho grid construction
+
+- **Van de**: `T::Randomness` co the khac nhau giua nodes neu chua finalize.
+- **Action**: Dung `frame_system::ParentHash` lam seed thay vi `Randomness` de dam bao determinism. Test trong Phase 2.
+- **Owner**: Phase 1.1
+
+### I10. Dual V3/V4 support cho da_block_import
+
+- **Van de**: Engram chi can V4, khong can V3. Code dual-version tang complexity.
+- **Action**: Dung feature flag `legacy-v3` trong [node/Cargo.toml](node/Cargo.toml). Default-off cho Engram build, on cho Avail compatibility build.
+- **Owner**: Phase 1.3
+
+### I11. Cache invalidation cho Full Node proof service
+
+- **Van de**: Full Node cache polynomial/FFT/MSM cho proof service. Chua noi cach invalidate.
+- **Action**: LRU cache theo `block_hash`, max 100 entries. Tu dong evict khi block bi bo (reorg).
+- **Owner**: Phase 1.5 (full_node_service.rs)
+
+### I12. Benchmark thresholds
+
+- **Van de**: Plan noi "block time < 20s, proof gen < 2s" nhung chua justify.
+- **Action**: Chay benchmark baseline tren hardware chuan (Engram spec: 8 cores, 16GB RAM) de set realistic thresholds. Update trong `progress.md`.
+- **Owner**: Phase 4.5
+
+### I13. Cross-binary protocol versioning
+
+- **Van de**: `avail-node` va `avail-light` co the release khong dong bo. Neu protocol thay doi, 2 binary mismatch -> network split.
+- **Action**:
+  - Dat protocol names trong `avail-core/cda/protocol.rs` voi version suffix (vd `/engram/cda/piece/1`)
+  - Khi breaking change: bump version `/2` va ca 2 binary phai update dong thoi
+  - Semver rules: minor bump cua avail-core = backward compatible wire format
+  - CI check: build test matrix (avail v1.0 + avail-light v1.0, avail v1.1 + avail-light v1.0, etc.)
+- **Owner**: Phase 0.2 (dinh nghia protocol.rs) + Phase 1.10 (test compatibility)
+
+### I14. avail-light Cargo workspace integration
+
+- **Van de**: avail-light repo co the co Cargo.lock rieng. Khi phat trien song song, cac thay doi o avail-core fork phai propagate sang avail-light.
+- **Action**:
+  - Dung `[patch.crates-io]` trong avail-light Cargo.toml de override avail-core path
+  - Hoac setup monorepo voi git submodule cho avail-core
+  - Document trong `progress.md` quy trinh update
+- **Owner**: Phase 1.10.1
 

@@ -53,3 +53,42 @@ pub mod v3 {
 		}
 	}
 }
+
+pub mod v4 {
+	use super::*;
+
+	pub const COLUMN_COMMITMENTS_SIZE: usize = 16 * 48;
+
+	/// Header commitment for V4: per-column KZG commitments on the extended grid.
+	#[derive(PartialEq, Eq, Clone, Default, Encode, Decode, TypeInfo)]
+	#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+	#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+	#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+	pub struct KateCommitment {
+		/// Packed bytes for 16 compressed G1 commitments (16 * 48 bytes).
+		pub column_commitments: Vec<u8>,
+		/// The merkle root of the data submitted
+		pub data_root: H256,
+	}
+
+	impl KateCommitment {
+		pub fn new(data_root: H256, column_commitments: Vec<u8>) -> Self {
+			Self {
+				column_commitments,
+				data_root,
+			}
+		}
+	}
+
+	impl fmt::Debug for KateCommitment {
+		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+			let commitments: &[u8] = self.column_commitments.as_slice();
+			let data_root: &[u8] = self.data_root.as_ref();
+
+			f.debug_struct("KateCommitment(v4)")
+				.field("column_commitments", &HexDisplay(commitments))
+				.field("data_root", &HexDisplay(data_root))
+				.finish()
+		}
+	}
+}

@@ -57,6 +57,8 @@ pub use app_extrinsic::AppExtrinsic;
 pub mod constants;
 pub use constants::*;
 
+pub mod cda;
+
 pub mod header_version;
 pub use header_version::HeaderVersion;
 

@@ -14,6 +14,7 @@ kate-recovery = { path = "recovery", default-features = false }
 
 # Crypto
 poly-multiproof = { workspace = true, default-features = false, features = ["blst"] }
+ark-ec = { version = "0.4", default-features = false }
 
 # Parity & Substrate
 codec = { package = "parity-scale-codec", version = "3", default-features = false, features = ["derive"] }
@@ -49,6 +50,7 @@ parallel = [ "criterion/rayon", "rayon" ]
 
 std = [
 	"avail-core/std",
+	"ark-ec/std",
 	"codec/std",
 	"kate-recovery/std",
 	"log",

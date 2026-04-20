@@ -233,6 +233,36 @@ impl EvaluationGrid {
 		})
 	}
 
+	pub fn extend_full(
+		&self,
+		row_factor: NonZeroU16,
+		col_factor: NonZeroU16,
+	) -> Result<Self, Error> {
+		let row_extended = self.extend_columns(row_factor)?;
+		let dims = row_extended.dims();
+		let (rows, cols): (usize, usize) = dims.into();
+		let new_cols = cols.saturating_mul(col_factor.get() as usize);
+		let domain = GeneralEvaluationDomain::<ArkScalar>::new(cols).ok_or(Error::DomainSizeInvalid)?;
+		let domain_new =
+			GeneralEvaluationDomain::<ArkScalar>::new(new_cols).ok_or(Error::DomainSizeInvalid)?;
+		ensure!(domain_new.size() == new_cols, Error::DomainSizeInvalid);
+
+		let mut out = DMatrix::from_element(rows, new_cols, ArkScalar::from(0u32));
+		for (row_index, row_view) in row_extended.evals.row_iter().enumerate() {
+			let mut row = row_view.iter().cloned().collect::<Vec<_>>();
+			domain.ifft_in_place(&mut row);
+			domain_new.fft_in_place(&mut row);
+			for (col_index, val) in row.into_iter().enumerate() {
+				out[(row_index, col_index)] = val;
+			}
+		}
+
+		Ok(Self {
+			lookup: row_extended.lookup,
+			evals: out,
+		})
+	}
+
 	pub fn make_polynomial_grid(&self) -> Result<PolynomialGrid, Error> {
 		let (_rows, cols): (usize, usize) = self.evals.shape();
 		let domain =
@@ -251,14 +281,44 @@ impl EvaluationGrid {
 			dims: self.dims(),
 			points: domain.elements().collect(),
 			inner,
+			orientation: PolyOrientation::Row,
 		})
 	}
+
+	pub fn make_column_polynomial_grid(&self) -> Result<PolynomialGrid, Error> {
+		let (rows, _cols): (usize, usize) = self.evals.shape();
+		let domain =
+			GeneralEvaluationDomain::<ArkScalar>::new(rows).ok_or(Error::DomainSizeInvalid)?;
+
+		let inner = self
+			.evals
+			.column_iter()
+			.map(|view| {
+				let col = view.iter().cloned().collect::<Vec<_>>();
+				domain.ifft(&col)
+			})
+			.collect::<Vec<_>>();
+
+		Ok(PolynomialGrid {
+			dims: self.dims(),
+			points: domain.elements().collect(),
+			inner,
+			orientation: PolyOrientation::Column,
+		})
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolyOrientation {
+	Row,
+	Column,
 }
 
 pub struct PolynomialGrid {
 	pub(crate) inner: Vec<Vec<ArkScalar>>,
 	pub(crate) points: Vec<ArkScalar>,
 	pub(crate) dims: Dimensions,
+	pub(crate) orientation: PolyOrientation,
 }
 
 impl PolynomialGrid {
@@ -266,6 +326,18 @@ impl PolynomialGrid {
 		&self,
 		srs: &(impl Committer<Bls12_381> + Sync),
 	) -> Result<Vec<Commitment>, Error> {
+		cfg_iter!(self.inner)
+			.map(|poly| srs.commit(poly).map_err(Error::MultiproofError))
+			.collect()
+	}
+
+	pub fn column_commitments(
+		&self,
+		srs: &(impl Committer<Bls12_381> + Sync),
+	) -> Result<Vec<Commitment>, Error> {
+		if self.orientation != PolyOrientation::Column {
+			return Err(Error::CellLengthExceeded);
+		}
 		cfg_iter!(self.inner)
 			.map(|poly| srs.commit(poly).map_err(Error::MultiproofError))
 			.collect()
