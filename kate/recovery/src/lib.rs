@@ -5,6 +5,7 @@ pub mod commitments;
 pub mod data;
 pub mod matrix;
 pub mod proof;
+pub mod rlnc;
 #[cfg(feature = "std")]
 pub mod sparse_slice_read;
 

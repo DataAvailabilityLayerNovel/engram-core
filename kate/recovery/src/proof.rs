@@ -9,7 +9,7 @@ use poly_multiproof::{
 	merlin::Transcript,
 	method1::{M1NoPrecomp, Proof as ArkProof},
 	msm::blst::BlstMSMEngine,
-	traits::{AsBytes, KZGProof, PolyMultiProofNoPrecomp},
+	traits::{AsBytes, Committer, KZGProof, PolyMultiProofNoPrecomp},
 };
 use sp_std::vec::Vec;
 type ArkCommitment = poly_multiproof::Commitment<Bls12_381>;
@@ -116,4 +116,38 @@ pub async fn verify_multi_proof(
 	}
 
 	Ok(true)
+}
+
+pub fn verify_segment_proof(
+	pmp: &M1NoPrecomp<Bls12_381, BlstMSMEngine>,
+	commitment: &[u8; 48],
+	proof: &[u8; 48],
+	points: &[ArkScalar],
+	evals: &[ArkScalar],
+) -> Result<bool, Error> {
+	let commitment = ArkCommitment::from_bytes(commitment).map_err(|_| Error::InvalidData)?;
+	let proof = ArkProof::from_bytes(proof).map_err(|_| Error::FailedToParseProof)?;
+	PolyMultiProofNoPrecomp::verify(
+		pmp,
+		&mut Transcript::new(b"avail-segment-mp"),
+		&[commitment],
+		points,
+		&[evals],
+		&proof,
+	)
+	.map_err(|_| Error::FailedToVerifyProof)
+}
+
+pub fn verify_column_commitment(
+	pmp: &M1NoPrecomp<Bls12_381, BlstMSMEngine>,
+	commitment: &[u8; 48],
+	column: &[ArkScalar],
+) -> Result<bool, Error> {
+	let commitment = ArkCommitment::from_bytes(commitment).map_err(|_| Error::InvalidData)?;
+	let domain = GeneralEvaluationDomain::<ArkScalar>::new(column.len()).ok_or(Error::InvalidDomain)?;
+	let polynomial = domain.ifft(column);
+	let computed = pmp.commit(&polynomial).map_err(|_| Error::InvalidData)?;
+	let commitment_bytes = commitment.to_bytes().map_err(|_| Error::InvalidData)?;
+	let computed_bytes = computed.to_bytes().map_err(|_| Error::InvalidData)?;
+	Ok(computed_bytes.as_ref() == commitment_bytes.as_ref())
 }

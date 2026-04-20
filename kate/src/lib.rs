@@ -5,6 +5,10 @@
 pub mod com;
 #[cfg(feature = "std")]
 pub mod gridgen;
+#[cfg(feature = "std")]
+pub mod rlnc;
+#[cfg(feature = "std")]
+pub mod segment_proof;
 
 pub mod couscous;
 pub mod metrics;
