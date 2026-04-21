@@ -76,6 +76,15 @@ This document records changes made in the **avail-core** repository (CDA Phase 0
   - **Kate Recovery path:** `cd recovery` from `kate/` (replaces incorrect `cd ../recovery`).
   - After recovery checks: **`cargo test -q`**.
 
+### 10. kate-recovery lifetime warning cleanup
+
+- **[kate/recovery/src/com.rs](kate/recovery/src/com.rs)** — fixed explicit lifetime in:
+  - `fn extract_encoded_extrinsic(range_data: &[u8]) -> SparseSliceRead<'_>`
+- Purpose: remove warning seen from external workspace checks (e.g. when `avail-light` compiles against this `avail-core` path dependency):
+  - `warning: hiding a lifetime that's elided elsewhere is confusing`
+  - `warning: kate-recovery (lib) generated 1 warning`
+- Validation: `cargo check -p kate-recovery` passes after the fix.
+
 ---
 
 ## Tests run (reference)
